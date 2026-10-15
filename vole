@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# Vole - keep your Linux clean, light, and running like new.
+# A Linux take on Mole (https://github.com/tw93/Mole), GPL-3.0.
+
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do _d=$(cd -P "$(dirname "$_src")" && pwd); _src=$(readlink "$_src"); [[ "$_src" != /* ]] && _src="$_d/$_src"; done
+VOLE_ROOT=$(cd -P "$(dirname "$_src")" && pwd)
+unset _src _d
+
+[[ "$(uname -s)" == "Linux" ]] || { echo "Vole runs on Linux only." >&2; exit 1; }
+(( BASH_VERSINFO[0] >= 4 )) || { echo "Vole needs bash 4 or newer." >&2; exit 1; }
+
+# shellcheck source=lib/core/common.sh
+source "$VOLE_ROOT/lib/core/common.sh"
+source "$VOLE_ROOT/lib/core/ui.sh"
+for _f in clean uninstall optimize purge installer history completion; do
+    # shellcheck disable=SC1090
+    source "$VOLE_ROOT/lib/$_f.sh"
+done
+unset _f
+
+[[ -f "$VOLE_ROOT/VERSION" ]] && VOLE_VERSION=$(<"$VOLE_ROOT/VERSION")
+
+if [[ $EUID -eq 0 && -z "${VOLE_ALLOW_ROOT:-}" && -n "${SUDO_USER:-}" ]]; then
+    warn "Run Vole without sudo; it asks for administrator access only when needed. (VOLE_ALLOW_ROOT=1 to override)"
+    exit 1
+fi
+
+banner() {
+    printf '%s' "$C_MAGENTA"
+    cat <<'EOF'
+   __   __    _
+   \ \ / /__ | | ___
+    \ V / _ \| |/ _ \
+     \_/\___/|_|\___|
+EOF
+    printf '%s  %sKeep your Linux clean, light, and fast · v%s%s\n\n' "$C_RESET" "$C_GRAY" "$VOLE_VERSION" "$C_RESET"
+}
+
+usage() {
+    banner
+    cat <<EOF
+Usage: vo [command] [options]
+
+  vo                      Interactive menu
+  vo clean                Deep cleanup: caches, logs, trash, dev & package caches, leftovers
+  vo uninstall            Remove apps (deb/rpm/pacman, Flatpak, Snap, AppImage) + leftovers
+  vo optimize             Refresh DNS, font/icon/desktop caches, databases, check services
+  vo analyze [path]       Visual disk explorer (or 'vo analyse')
+  vo status               Live system health dashboard
+  vo purge                Clean project build artifacts (node_modules, target, build…)
+  vo installer            Find and remove installer files (.deb .rpm .iso .run…)
+
+  vo history [--json]     Show what Vole removed
+  vo completion [shell]   Set up shell tab completion
+  vo update               Update Vole
+  vo remove               Remove Vole from this system
+  vo --help | --version
+
+Preview safely:
+  vo clean --dry-run      vo uninstall --dry-run     vo purge --dry-run
+  vo clean --whitelist    vo optimize --whitelist    vo purge --paths
+  vo analyze --json ~/    vo status --json
+
+Logs: ${VOLE_OPLOG/#$HOME/\~} (disable with VOLE_NO_OPLOG=1)
+EOF
+}
+
+run_go_tool() {
+    local name="$1"; shift
+    local bin
+    if bin=$(find_go_binary "$name"); then exec "$bin" "$@"; fi
+    if [[ -d "$VOLE_ROOT/cmd/$name" ]] && command -v go >/dev/null 2>&1; then
+        say "${C_GRAY}Building vole-$name (first run)…${C_RESET}"
+        (cd "$VOLE_ROOT" && go build -trimpath -ldflags "-s -w" -o "bin/vole-$name" "./cmd/$name") && exec "$VOLE_ROOT/bin/vole-$name" "$@"
+    fi
+    die "vole-$name binary not found for $(go_arch). Reinstall Vole, or install Go and run 'make build'."
+}
+
+cmd_update() {
+    if [[ -d "$VOLE_ROOT/.git" ]]; then
+        git -C "$VOLE_ROOT" pull --ff-only && { command -v go >/dev/null 2>&1 && make -C "$VOLE_ROOT" build >/dev/null 2>&1; ok "Vole updated to $(cat "$VOLE_ROOT/VERSION" 2>/dev/null || echo latest)"; }
+    else
+        local prefix_args=()
+        [[ "$VOLE_ROOT" == /usr/local/lib/vole ]] && prefix_args=(--prefix /usr/local)
+        curl -fsSL "${VOLE_INSTALL_URL:-https://raw.githubusercontent.com/wuqingwei/vole/main/install.sh}" | bash -s -- "${prefix_args[@]}"
+    fi
+}
+
+cmd_remove() {
+    say "This removes Vole itself (not your files)."
+    confirm "Remove Vole?" n || { say "Cancelled."; return; }
+    local link
+    for link in "$HOME/.local/bin/vole" "$HOME/.local/bin/vo" /usr/local/bin/vole /usr/local/bin/vo; do
+        if [[ -L "$link" ]] && [[ "$(readlink -f "$link")" == "$VOLE_ROOT/"* ]]; then
+            rm -f "$link" 2>/dev/null || as_root rm -f "$link"
+        fi
+    done
+    rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/vole" "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/vo" \
+          "$HOME/.zsh/completions/_vole" "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/vole.fish" "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/vo.fish" 2>/dev/null
+    if [[ "$VOLE_ROOT" == "${XDG_DATA_HOME:-$HOME/.local/share}/vole" || "$VOLE_ROOT" == /usr/local/lib/vole || "$VOLE_ROOT" == /opt/vole ]]; then
+        rm -rf -- "$VOLE_ROOT" 2>/dev/null || as_root rm -rf -- "$VOLE_ROOT"
+    fi
+    if confirm "Also delete settings and history (~/.config/vole, ~/.local/state/vole)?" n; then rm -rf -- "$VOLE_CONFIG_DIR" "$VOLE_STATE_DIR"; fi
+    ok "Vole removed. Thanks for using it."
+}
+
+interactive_menu() {
+    banner
+    local items=(
+        "clean       Deep cleanup"
+        "uninstall   Remove apps + leftovers"
+        "optimize    Refresh caches & services"
+        "analyze     Visual disk explorer"
+        "status      Live system dashboard"
+        "purge       Clean project artifacts"
+        "installer   Remove installer files"
+        "history     What Vole removed"
+    )
+    VOLE_MENU_LABELS=("${items[@]}")
+    select_single "What would you like to do?" || exit 0
+    local c="${items[$VOLE_MENU_CHOICE]%% *}"
+    dispatch "$c"
+}
+
+dispatch() {
+    local cmd="${1:-}"; shift || true
+    case "$cmd" in
+        "") if [[ -t 0 && -t 1 ]]; then interactive_menu; else usage; fi ;;
+        clean) cmd_clean "$@" ;;
+        uninstall|remove-app) cmd_uninstall "$@" ;;
+        optimize|optimise) cmd_optimize "$@" ;;
+        analyze|analyse) run_go_tool analyze "$@" ;;
+        status) run_go_tool status "$@" ;;
+        purge) cmd_purge "$@" ;;
+        installer|installers) cmd_installer "$@" ;;
+        history) cmd_history "$@" ;;
+        completion) cmd_completion "$@" ;;
+        update) cmd_update "$@" ;;
+        remove|self-remove) cmd_remove "$@" ;;
+        -h|--help|help) usage ;;
+        -v|--version|version) echo "Vole $VOLE_VERSION ($(distro_name), $(uname -m))" ;;
+        *) err "Unknown command: $cmd"; echo "Run 'vo --help' for usage." >&2; exit 2 ;;
+    esac
+}
+
+dispatch "$@"
