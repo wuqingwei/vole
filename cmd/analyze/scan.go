@@ -207,7 +207,7 @@ func (s *Scanner) ScanDir(dir string) Result {
 			if e.Type()&os.ModeSymlink != 0 {
 				var lst syscall.Stat_t
 				_ = syscall.Lstat(p, &lst)
-				en.Size, en.Status = diskUsage(&lst), statusComplete
+				en.Size, en.Files, en.Status = diskUsage(&lst), 1, statusComplete
 			} else {
 				en.Size, en.Files, en.Status = s.sizeOf(p, uint64(st.Dev))
 			}
@@ -219,9 +219,6 @@ func (s *Scanner) ScanDir(dir string) Result {
 	for _, e := range out {
 		res.TotalSize += e.Size
 		res.TotalFiles += e.Files
-		if !e.IsDir {
-			res.TotalFiles++
-		}
 		if e.Status != statusComplete {
 			res.Status = statusPartial
 		}

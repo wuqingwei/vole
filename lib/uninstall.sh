@@ -8,8 +8,6 @@ VOLE_UNINSTALL_DENY_RE='^(gnome-shell|gnome-session.*|gnome-control-center|nauti
 # App record: source|id|name|bytes|last_used_epoch|extra
 _apps=()
 
-_desktop_field() { awk -F= -v k="$2" '$1==k{ $1=""; sub(/^=/,""); print substr($0,2); exit }' "$1" 2>/dev/null; }
-
 _atime_of() { stat -c %X -- "$1" 2>/dev/null || echo 0; }
 
 collect_pkg_apps() {
@@ -17,8 +15,8 @@ collect_pkg_apps() {
     local files=() f
     for f in /usr/share/applications/*.desktop /usr/local/share/applications/*.desktop; do
         [[ -f "$f" ]] || continue
-        [[ "$(_desktop_field "$f" NoDisplay)" == "true" ]] && continue
-        [[ "$(_desktop_field "$f" Type)" == "Application" ]] || continue
+        [[ "$(desktop_field "$f" NoDisplay)" == "true" ]] && continue
+        [[ "$(desktop_field "$f" Type)" == "Application" ]] || continue
         files+=("$f")
     done
     (( ${#files[@]} )) || return 0
@@ -48,14 +46,14 @@ collect_pkg_apps() {
         [[ -n "${seen[$pkg]:-}" ]] && continue
         [[ "$pkg" =~ $VOLE_UNINSTALL_DENY_RE ]] && continue
         seen[$pkg]=1
-        name=$(_desktop_field "$f" Name); [[ -z "$name" ]] && name="$pkg"
+        name=$(desktop_field "$f" Name); [[ -z "$name" ]] && name="$pkg"
         case "$pm" in
             apt) bytes=$(( $(dpkg-query -W -f='${Installed-Size}' "$pkg" 2>/dev/null || echo 0) * 1024 )) ;;
             dnf|yum|zypper) bytes=$(rpm -q --qf '%{SIZE}' "$pkg" 2>/dev/null || echo 0) ;;
             pacman) bytes=$(LANG=C pacman -Qi "$pkg" 2>/dev/null | awk -F: '/^Installed Size/{gsub(/ /,"",$2); v=$2; m=1; if(v~/KiB/)m=1024; else if(v~/MiB/)m=1048576; else if(v~/GiB/)m=1073741824; gsub(/[A-Za-z]/,"",v); printf "%d", v*m}') ;;
             *) bytes=0 ;;
         esac
-        local exe; exe=$(_desktop_field "$f" Exec | awk '{print $1}')
+        local exe; exe=$(desktop_field "$f" Exec | awk '{print $1}')
         exe=$(command -v "$exe" 2>/dev/null || echo "$f")
         used=$(_atime_of "$exe")
         _apps+=("$pm|$pkg|$name|${bytes:-0}|$used|$f")
@@ -100,12 +98,12 @@ collect_local_launchers() {
     local f exe name dir
     for f in "$HOME/.local/share/applications"/*.desktop; do
         [[ -f "$f" ]] || continue
-        [[ "$(_desktop_field "$f" NoDisplay)" == "true" ]] && continue
-        exe=$(_desktop_field "$f" Exec | awk '{print $1}' | tr -d '"')
+        [[ "$(desktop_field "$f" NoDisplay)" == "true" ]] && continue
+        exe=$(desktop_field "$f" Exec | awk '{print $1}' | tr -d '"')
         case "$exe" in flatpak|snap|env|"") continue ;; esac
         [[ "$exe" == *.AppImage ]] && continue
         [[ "$exe" == "$HOME"/* || "$exe" == /opt/* ]] || continue
-        name=$(_desktop_field "$f" Name)
+        name=$(desktop_field "$f" Name)
         # Install dir: the top folder under ~/.local/share, ~/opt, ~/apps or /opt that holds the binary
         dir=$(awk -v h="$HOME" -v e="$exe" 'BEGIN{
             n=split(e,p,"/"); base="";
@@ -180,7 +178,7 @@ _uninstall_one() {
             [[ "$kind" == data && "$with_data" != "1" ]] && continue
             safe_remove "$path" >/dev/null || true
         done < <(app_leftovers "$src" "$id" "$name")
-        ok "Removed $name"
+        if [[ "$VOLE_DRY_RUN" != "1" ]]; then ok "Removed $name"; fi
         return 0
     fi
     err "Could not remove $name ($src)"
@@ -269,6 +267,10 @@ cmd_uninstall() {
     echo; rule
     say "${C_BOLD}Uninstall $( [[ $VOLE_DRY_RUN == 1 ]] && echo "preview" || echo "complete")${C_RESET}"
     local joined; joined=$(IFS=,; echo "${done_names[*]}")
-    say "Removed $removed app$( ((removed==1)) || echo s), freed $(human "$freed"): ${joined//,/, }"
+    if [[ "$VOLE_DRY_RUN" == "1" ]]; then
+        say "Would remove $removed app$( ((removed==1)) || echo s), would free $(human "$freed"): ${joined//,/, }"
+    else
+        say "Removed $removed app$( ((removed==1)) || echo s), freed $(human "$freed"): ${joined//,/, }"
+    fi
     rule
 }

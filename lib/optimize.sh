@@ -79,9 +79,15 @@ opt_desktop_caches() {
         local t n=0
         for t in "$HOME/.local/share/icons"/*/ "$HOME/.icons"/*/; do
             [[ -f "$t/index.theme" ]] || continue
-            [[ "$VOLE_DRY_RUN" == "1" ]] || gtk-update-icon-cache -f -q "$t" >/dev/null 2>&1 && n=$((n+1))
+            if [[ "$VOLE_DRY_RUN" == "1" ]]; then n=$((n+1))
+            elif gtk-update-icon-cache -f -q "$t" >/dev/null 2>&1; then n=$((n+1)); fi
         done
-        (( n > 0 )) && applied "Icon caches rebuilt ($n themes)" || unchanged "No user icon themes to rebuild"
+        if (( n > 0 )); then
+            if [[ "$VOLE_DRY_RUN" == "1" ]]; then step "Icon caches would be rebuilt ($n themes) (dry run)"; OPT_APPLIED=$((OPT_APPLIED+1))
+            else applied "Icon caches rebuilt ($n themes)"; fi
+        else
+            unchanged "No user icon themes to rebuild"
+        fi
     fi
     if opt_allowed thumbnails "Failed thumbnails"; then
         if [[ -d "$HOME/.cache/thumbnails/fail" ]] && [[ -n "$(ls -A "$HOME/.cache/thumbnails/fail" 2>/dev/null)" ]]; then

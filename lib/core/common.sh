@@ -91,6 +91,9 @@ distro_name() {
 
 is_running() { pgrep -x -u "$(id -u)" "$1" >/dev/null 2>&1 || pgrep -f -u "$(id -u)" -- "$1" >/dev/null 2>&1; }
 
+# desktop_field FILE KEY -> value of the first "KEY=" line, split on the first '=' only
+desktop_field() { awk -v k="$2" 'index($0, k "=")==1 { print substr($0, length(k)+2); exit }' "$1" 2>/dev/null; }
+
 # ---------------------------------------------------------------- sudo
 VOLE_SUDO_OK=""
 need_sudo() {

@@ -119,13 +119,39 @@ mkdir -p "$HOME/Applications"; mk "$HOME/Applications/Foo-1.0-x86_64.AppImage" 2
 mk "$HOME/.cache/Foo-1.0-x86_64/c" 100
 out=$("$VO" uninstall --list 2>&1)
 check "uninstall lists AppImage" 'grep -q "Foo-1.0-x86_64" <<<"$out"'
+out=$("$VO" uninstall --dry-run Foo </dev/null 2>&1)
+check "uninstall dry run says would remove" 'grep -q "Would remove" <<<"$out"'
+check "uninstall dry run removes nothing" '[[ -e "$HOME/Applications/Foo-1.0-x86_64.AppImage" ]]'
+check "uninstall dry run does not claim removed" '! grep -q "Removed Foo" <<<"$out"'
+check "uninstall dry run summary is conditional" 'grep -q "Would remove 1 app" <<<"$out"'
 "$VO" uninstall --yes Foo </dev/null >/dev/null 2>&1
 check "AppImage removed by name" '[[ ! -e "$HOME/Applications/Foo-1.0-x86_64.AppImage" ]]'
 check "AppImage cache removed" '[[ ! -e "$HOME/.cache/Foo-1.0-x86_64" ]]'
 
+echo "== desktop_field"
+(
+source "$ROOT/lib/core/common.sh"
+printf '[Desktop Entry]\nType=Application\nName=X\nExec=env FOO=bar /opt/x/run --a=1 %%U\n' > "$T/d.desktop"
+[[ "$(desktop_field "$T/d.desktop" Exec)" == 'env FOO=bar /opt/x/run --a=1 %U' ]] || exit 1
+[[ "$(desktop_field "$T/d.desktop" Name)" == "X" ]] || exit 1
+exit 0
+) && ok "desktop_field keeps = inside values" || bad "desktop_field keeps = inside values"
+
 echo "== optimize"
 out=$("$VO" optimize --dry-run 2>&1)
 check "optimize runs and summarizes" 'grep -q "Optimization Complete" <<<"$out"'
+mkdir -p "$T/fakebin" "$HOME/.local/share/icons/TestTheme"
+touch "$HOME/.local/share/icons/TestTheme/index.theme"
+printf '#!/bin/bash\necho RAN >> "%s/icon-ran"\n' "$T" > "$T/fakebin/gtk-update-icon-cache"
+chmod +x "$T/fakebin/gtk-update-icon-cache"
+out=$(PATH="$T/fakebin:$PATH" "$VO" optimize --dry-run 2>&1)
+check "icon dry run does not claim rebuilt" '! grep -q "Icon caches rebuilt" <<<"$out"'
+check "icon dry run says would rebuild" 'grep -q "would be rebuilt" <<<"$out"'
+check "icon dry run runs nothing" '[[ ! -e "$T/icon-ran" ]]'
+out=$(PATH="$T/fakebin:$PATH" "$VO" optimize 2>&1)
+check "icon real run rebuilds" 'grep -q "Icon caches rebuilt" <<<"$out"'
+check "icon real run executed the tool" '[[ -f "$T/icon-ran" ]]'
+rm -rf "$HOME/.local/share/icons"
 
 echo "== misc"
 check "help" '"$VO" --help | grep -q "vo clean"'
@@ -136,6 +162,8 @@ check "unknown command fails" '! "$VO" frobnicate >/dev/null 2>&1'
 if bin=$(ls "$ROOT"/bin/vole-status* 2>/dev/null | head -1) && [[ -x "$bin" ]]; then
     check "status --json" '"$VO" status --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d[\"memory\"][\"total\"]>0"'
     check "analyze --json" '"$VO" analyze --json "$HOME" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d[\"scan_status\"] in (\"complete\",\"partial\")"'
+    mkdir -p "$T/count/sub"; mk "$T/count/a" 100; mk "$T/count/b" 100; mk "$T/count/sub/c" 100
+    check "analyze counts each file once" '"$VO" analyze --json "$T/count" | python3 -c "import json,sys; assert json.load(sys.stdin)[\"total_files\"]==3"'
 fi
 
 echo

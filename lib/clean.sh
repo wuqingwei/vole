@@ -199,7 +199,7 @@ clean_leftovers() {
     local broken=() f exe
     for f in "$HOME/.local/share/applications"/*.desktop "$HOME/.config/autostart"/*.desktop; do
         [[ -f "$f" ]] || continue
-        exe=$(awk -F= '/^Exec=/{print $2; exit}' "$f" | awk '{print $1}' | tr -d '"')
+        exe=$(desktop_field "$f" Exec | awk '{print $1}' | tr -d '"')
         [[ -z "$exe" ]] && continue
         case "$exe" in env|sh|bash|flatpak|snap|wine|/usr/bin/env) continue ;; esac
         if [[ "$exe" == /* ]]; then [[ -e "$exe" ]] || broken+=("$f")
@@ -377,7 +377,7 @@ EOF
     load_whitelist
     VOLE_CLEANED_DIRS=()
     local free_before; free_before=$(free_bytes "$HOME")
-    title "Clean Your Linux${VOLE_DRY_RUN:+}$( [[ "$VOLE_DRY_RUN" == "1" ]] && printf '  %s(dry run)%s' "$C_YELLOW" "$C_RESET")"
+    title "Clean Your Linux$( [[ "$VOLE_DRY_RUN" == "1" ]] && printf '  %s(dry run)%s' "$C_YELLOW" "$C_RESET")"
     printf '%s %s | %s | Free space: %s\n' "$ICON_GEAR" "$(distro_name)" "$(uname -m)" "$(human "$free_before")"
     oplog run-start "clean" 0
     local cats=0
