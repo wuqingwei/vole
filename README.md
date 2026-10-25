@@ -48,6 +48,13 @@ cd vole && ./install.sh                    # 装到 ~/.local
 
 > 国内用户：GitHub 访问慢可以直接在 Releases 页下载 `vole-x.y.z-linux.tar.gz`，解压后运行 `./install.sh`，包里已带 amd64 和 arm64 静态二进制。自己编译时可以设 `GOPROXY=https://goproxy.cn`。
 
+**附：Windows 附加脚本** —— 在 Windows（Git Bash）下清理百度网盘的 P2P 加速缓存和安装目录死重文件：
+
+```bash
+bash scripts/clean-baidunetdisk.sh        # 执行清理（会先退出网盘进程）
+bash scripts/clean-baidunetdisk.sh -n     # 仅预览
+```
+
 **运行**
 
 ```bash
